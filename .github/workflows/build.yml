@@ -1,0 +1,49 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch prebuilt ffmpeg for Android (arm64-v8a, GPL)
+        run: |
+          set -e
+          mkdir -p libs/android-v8
+          API_URL="https://api.github.com/repos/tqk2811/FFmpegBuild/releases/tags/Release-2026-08-10"
+          ASSET_URL=$(curl -s "$API_URL" \
+            | grep -o '"browser_download_url": *"[^"]*"' \
+            | cut -d '"' -f4 \
+            | grep -i android | grep -i arm64-v8a | grep -i gpl | grep -vi lgpl \
+            | head -n 1)
+          if [ -z "$ASSET_URL" ]; then
+            echo "No matching ffmpeg release asset found -- building without bundled ffmpeg."
+            exit 0
+          fi
+          echo "Downloading $ASSET_URL"
+          curl -L "$ASSET_URL" -o ffmpeg-android.zip
+          mkdir -p ffmpeg-extract
+          unzip -o ffmpeg-android.zip -d ffmpeg-extract
+          find ffmpeg-extract -type f -name "*.so" -exec cp {} libs/android-v8/ \;
+          find ffmpeg-extract -type f -name "ffmpeg" -exec cp {} libs/android-v8/libffmpeg_bin.so \;
+          find ffmpeg-extract -type f -name "ffprobe" -exec cp {} libs/android-v8/libffprobe_bin.so \;
+          echo "Staged files:"
+          ls -la libs/android-v8/ || true
+
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: henx-downloader-apk
+          path: ${{ steps.buildozer.outputs.filename }}
